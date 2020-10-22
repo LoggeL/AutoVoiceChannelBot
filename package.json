@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "discord.js": "discordjs/discord.js#250c3ae"
+  }
+}
