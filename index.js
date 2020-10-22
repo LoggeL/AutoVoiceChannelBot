@@ -21,6 +21,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
     // Does it exist?
     if (!addChannel) return console.error('No creation channel found')
 
+    // Create new channel
     if (newState.channel == addChannel) {
         addChannel.guild.channels.create("-> " + member.user.username, {
             type: 'voice',
@@ -34,12 +35,18 @@ client.on('voiceStateUpdate', (oldState, newState) => {
         }).catch(console.error)
     }
 
+    // Don't delete add channel
     if (!oldState.channel || oldState.channel === addChannel) return
 
+    // Remove empty channels
     if (oldState.channel.parent && oldState.channel.parent === addCategory && oldState.channel.members && oldState.channel.members.size === 0) {
         oldState.channel.delete().catch(console.error)
         return
     }
+
+    // ToDo 
+    // Transfer "Ownership" to other member on leave
+    // ???
 })
 
 client.login(config.token).catch(console.error)
