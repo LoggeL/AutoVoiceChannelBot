@@ -22,7 +22,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
     if (!addChannel) return console.error('No creation channel found')
 
     if (newState.channel == addChannel) {
-        addChannel.guild.channels.create(member.user.username, {
+        addChannel.guild.channels.create("-> " + member.user.username, {
             type: 'voice',
             parent: addCategory,
             permissionOverwrites: [{
