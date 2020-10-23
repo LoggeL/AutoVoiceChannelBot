@@ -13,7 +13,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
     const member = newState.member
 
     // Fetch Voice Category
-    const addCategory = newState.guild.channels.cache.find(channel => channel.name == "Voice Chat 🎤" && channel.type === "category")
+    const addCategory = newState.guild.channels.cache.find(channel => channel.name == "Voice Chat🎤" && channel.type === "category")
 
     // Fetch Create Channel channel
     const addChannel = newState.guild.channels.cache.find(channel => channel.name == '➕ Create Channel' && channel.type === "voice")
@@ -21,11 +21,13 @@ client.on('voiceStateUpdate', (oldState, newState) => {
     // Does it exist?
     if (!addChannel) return console.error('No creation channel found')
 
+    if (!addCategory) return console.error('No creation category found')
+
     // Create new channel
     if (newState.channel == addChannel) {
-        addChannel.guild.channels.create("-> " + member.user.username, {
+        addChannel.guild.channels.create("◾ " + member.user.username, {
             type: 'voice',
-            parent: addCategory,
+            parent: addCategory.id,
             permissionOverwrites: [{
                 id: member.id,
                 allow: ['MANAGE_CHANNELS']
@@ -44,8 +46,19 @@ client.on('voiceStateUpdate', (oldState, newState) => {
         return
     }
 
+    if (oldState.channel.parent && oldState.channel.parent === addCategory && oldState.channel.members && oldState.channel.members.size > 0 && oldState.channel.name === "◾ " + member.user.username) {
+        const newOwner = oldState.channel.members.random()
+        oldState.channel.edit({
+            name: "◾ " + newOwner.user.username,
+            type: 'voice',
+            parent: addCategory.id,
+            permissionOverwrites: [{
+                id: newOwner.id,
+                allow: ['MANAGE_CHANNELS']
+            }]
+        }).catch(console.error)
+    }
     // ToDo 
-    // Transfer "Ownership" to other member on leave
     // ???
 })
 
