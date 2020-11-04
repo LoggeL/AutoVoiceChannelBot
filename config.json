@@ -1,3 +1,6 @@
 {
-    "token": "token-here"
+    "token": "token-here",
+    "categoryName": "Voice Chat 🎤",
+    "channelName": "➕ Create Channel",
+    "testGuild": "412986571944361984"
 }
