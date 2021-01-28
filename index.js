@@ -43,6 +43,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
                 allow: ['MANAGE_CHANNELS', 'MANAGE_ROLES']
             }]
         }).then(channel => {
+            if (config.highBitrateGuilds.includes(channel.guild.id)) channel.setBitrate(96000)
             newState.setChannel(channel)
             addChannel.guild.channels.create(member.user.username.toLowerCase(), {
                 type: 'text',
