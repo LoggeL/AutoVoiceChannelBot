@@ -101,10 +101,10 @@ client.on('voiceStateUpdate', (oldState, newState) => {
         return
     }
 
-    if (oldState.channel.parent && oldState.channel.parent === addCategory && oldState.channel.members && oldState.channel.members.size > 0 && oldState.channel.name === member.user.username.toLowerCase()) {
+    if (oldState.channel.parent && oldState.channel.parent === addCategory && oldState.channel.members && oldState.channel.members.size > 0 && oldState.channel.name === member.user.username) {
         const newOwner = oldState.channel.members.random()
         oldState.channel.edit({
-            name: newOwner.user.username.toLowerCase(),
+            name: newOwner.user.username,
             type: 'voice',
             parent: addCategory.id,
             permissionOverwrites: [{
