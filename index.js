@@ -1,13 +1,69 @@
 const Discord = require('discord.js')
 const client = new Discord.Client()
 const config = require('./config.json')
+const knex = require('knex')({
+  client: 'sqlite3',
+  connection: {
+    filename: './db.sqlite3',
+  },
+  useNullAsDefault: true,
+})
+
+// Check if table exists
+knex.schema.hasTable('guildSetting').then((exists) => {
+  if (!exists) {
+    return knex.schema.createTable('guildSetting', (t) => {
+      t.int('id').primary()
+      t.string('guild')
+      t.boolean('textChannel').defaultTo(false)
+    })
+  }
+})
 
 let textIDs = new Discord.Collection()
+let createTextChannel = new Discord.Collection()
 
 client.on('ready', () => {
   console.log(
     `${client.user.tag} ready! Watching ${client.guilds.cache.size} guilds.`
   )
+
+  // Load config from database
+  knex('guildSetting').then((rows) => {
+    rows.forEach((row) => {
+      createTextChannel.set(row.guild, row.textChannel)
+    })
+  })
+
+  // Set status
+  client.user.setActivity('for !text', { type: 'WATCHING' })
+})
+
+client.on('message', (message) => {
+  if (message.author.bot) return
+  if (message.channel.type === 'dm') return
+
+  // Check if user has permission to create text channel
+  if (!message.member.hasPermission('MANAGE_CHANNELS')) return
+
+  if (message.content !== '!text') return
+
+  const toggle = createTextChannel.get(message.guild.id)
+  message.reply(
+    !toggle
+      ? 'Bot will now create a text channel for every voice channel created.'
+      : 'Bot will no longer create a text channel for every voice channel created.'
+  )
+
+  // Update database
+  knex('guildSetting')
+    .where('guild', message.guild.id)
+    .update({
+      textChannel: !toggle,
+    })
+    .then(() => {
+      createTextChannel.set(message.guild.id, !toggle)
+    })
 })
 
 client.on('voiceStateUpdate', (oldState, newState) => {
@@ -48,6 +104,10 @@ client.on('voiceStateUpdate', (oldState, newState) => {
         if (config.highBitrateGuilds.includes(channel.guild.id))
           channel.setBitrate(96000)
         newState.setChannel(channel)
+
+        // Check if setting for server is set
+        if (!createTextChannel.get(channel.guild.id)) return
+
         addChannel.guild.channels
           .create(member.user.username.toLowerCase(), {
             type: 'text',
@@ -74,7 +134,9 @@ client.on('voiceStateUpdate', (oldState, newState) => {
       .catch(console.error)
   }
 
+  // User moves from a channel that is not the creation channel
   if (
+    createTextChannel.get(newState.guild.id) &&
     oldState.channel &&
     oldState.channel !== addChannel &&
     oldState.channel.parentID == addCategory.id &&
@@ -89,7 +151,9 @@ client.on('voiceStateUpdate', (oldState, newState) => {
     txtChannel.overwritePermissions(overWrites)
   }
 
+  // User moves to a channel that is not the creation channel
   if (
+    createTextChannel.get(newState.guild.id) &&
     newState.channel &&
     newState.channel !== addChannel &&
     newState.channel.parentID == addCategory.id
@@ -120,15 +184,22 @@ client.on('voiceStateUpdate', (oldState, newState) => {
     oldState.channel.members &&
     oldState.channel.members.size === 0
   ) {
-    const textChannel = oldState.guild.channels.cache.get(
-      textIDs.get(oldState.channel.id)
-    )
-    if (textChannel) textChannel.delete().catch(console.error)
+    // Remove voice channel
+    const oldId = oldState.channel.id
     oldState.channel.delete().catch(console.error)
-    textIDs.delete(oldState.channel.id)
-    return
+    // Remove text channel
+    if (!createTextChannel.get(oldState.guild.id)) return
+    const textChannel = oldState.guild.channels.cache.get(textIDs.get(oldId))
+    if (textChannel)
+      textChannel
+        .delete()
+        .then(() => {
+          textIDs.delete(oldId)
+        })
+        .catch(console.error)
   }
 
+  //   Make user owner of channel
   if (
     oldState.channel.parent &&
     oldState.channel.parent === addCategory &&
@@ -151,6 +222,8 @@ client.on('voiceStateUpdate', (oldState, newState) => {
       })
       .catch(console.error)
 
+    if (!createTextChannel.get(oldState.guild.id)) return
+
     const txtID = textIDs.get(oldState.channel.id)
     if (!txtID) return
     const txtChannel = oldState.guild.channels.cache.get(txtID)
@@ -169,15 +242,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
         allow: ['MANAGE_CHANNELS', 'VIEW_CHANNEL', 'MANAGE_ROLES'],
       }
     )
-    txtChannel.edit({
-      name: newOwner.user.username.toLowerCase(),
-      type: 'text',
-      parent: addCategory.id,
-      permissionOverwrites: overWrites,
-    })
   }
-  // ToDo
-  // ???
 })
 
 client.login(config.token).catch(console.error)
