@@ -11,9 +11,9 @@ A bot that automatically creates voice channels for users in a server.
 
 ## Configuration
 
-`token` - The bot token.
-`categoryName` - The name of the category to create the channels in.
-`channelName` - The name of the channel to create the channels in.
+`token` - The bot token.  
+`categoryName` - The name of the category to create the channels in.  
+`channelName` - The name of the channel to create the channels in.  
 `highBitrateGuilds` - The IDs of the guilds to use a high bitrate for the channels.
 
 ## Commands
@@ -26,13 +26,13 @@ MIT
 
 ## Credits
 
-discord.js
-knex
+discord.js  
+knex  
 sqlite3
 
 ## Contact
 
-Discord: `@Logge#1337`
+Discord: `@Logge#1337`  
 Telegram: `@LoggeL`
 
 ## Bugs
