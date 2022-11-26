@@ -31,6 +31,7 @@ client.on('ready', () => {
   // Load config from database
   knex('guildSetting').then((rows) => {
     rows.forEach((row) => {
+      console.log('guildSetting: ' + row.guild + ' ' + row.textChannel)
       createTextChannel.set(row.guild, row.textChannel)
     })
   })
