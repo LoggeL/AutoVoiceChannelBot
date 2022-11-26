@@ -31,8 +31,17 @@ client.on('ready', () => {
   // Load config from database
   knex('guildSetting').then((rows) => {
     rows.forEach((row) => {
-      console.log('guildSetting: ' + row.guild + ' ' + row.textChannel)
+      console.log('guildSettingDB: ' + row.guild + ' ' + row.textChannel)
       createTextChannel.set(row.guild, row.textChannel)
+    })
+
+    // Check if all servers are set
+    client.guilds.cache.forEach((guild) => {
+      if (!createTextChannel.has(guild.id)) {
+        console.log('guildSetting: ' + guild.id + ' false')
+        createTextChannel.set(guild.id, false)
+        knex('guildSetting').insert({ guild: guild.id, textChannel: false })
+      }
     })
   })
 
