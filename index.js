@@ -38,9 +38,16 @@ client.on('ready', () => {
     // Check if all servers are set
     client.guilds.cache.forEach((guild) => {
       if (!createTextChannel.has(guild.id)) {
-        console.log('guildSetting: ' + guild.id + ' false')
+        console.log('guildSettingInsert: ' + guild.id + ' false')
         createTextChannel.set(guild.id, false)
-        knex('guildSetting').insert({ guild: guild.id, textChannel: false })
+        knex('guildSetting')
+          .insert({ guild: guild.id, textChannel: false })
+          .then(() => {
+            console.log('guildSettingInserted: ' + guild.id + ' false')
+          })
+          .catch((err) => {
+            console.log(err)
+          })
       }
     })
   })
@@ -56,24 +63,32 @@ client.on('message', (message) => {
   // Check if user has permission to create text channel
   if (!message.member.hasPermission('MANAGE_CHANNELS')) return
 
-  if (message.content !== '!text') return
+  switch (message.content) {
+    case '!text':
+      const toggle = createTextChannel.get(message.guild.id)
+      message.reply(
+        !toggle
+          ? 'Bot will now create a text channel for every voice channel created.'
+          : 'Bot will no longer create a text channel for every voice channel created.'
+      )
 
-  const toggle = createTextChannel.get(message.guild.id)
-  message.reply(
-    !toggle
-      ? 'Bot will now create a text channel for every voice channel created.'
-      : 'Bot will no longer create a text channel for every voice channel created.'
-  )
+      console.log('guildSetting: ' + message.guild.id + ' ' + !toggle)
 
-  // Update database
-  knex('guildSetting')
-    .where('guild', message.guild.id)
-    .update({
-      textChannel: !toggle,
-    })
-    .then(() => {
-      createTextChannel.set(message.guild.id, !toggle)
-    })
+      // Update database
+      knex('guildSetting')
+        .where('guild', message.guild.id)
+        .update({
+          textChannel: !toggle,
+        })
+        .then(() => {
+          createTextChannel.set(message.guild.id, !toggle)
+        })
+      break
+    case '!check':
+      const createTextChannelSetting = createTextChannel.get(message.guild.id)
+      message.reply('Bot is set to: ' + createTextChannelSetting)
+      break
+  }
 })
 
 client.on('voiceStateUpdate', (oldState, newState) => {
