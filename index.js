@@ -10,12 +10,26 @@ const knex = require('knex')({
 })
 
 // Check if table exists
+
+// guildSettings
 knex.schema.hasTable('guildSetting').then((exists) => {
   if (!exists) {
     return knex.schema.createTable('guildSetting', (t) => {
-      t.int('id').primary()
+      // Id primary autoincrement
+      t.increments('id').primary()
       t.string('guild')
       t.boolean('textChannel').defaultTo(false)
+    })
+  }
+})
+
+// textIDs
+knex.schema.hasTable('textIDs').then((exists) => {
+  if (!exists) {
+    return knex.schema.createTable('textIDs', (t) => {
+      t.increments('id').primary()
+      t.string('voiceChannel')
+      t.string('textChannel')
     })
   }
 })
@@ -29,7 +43,7 @@ client.on('ready', () => {
   )
 
   // Load config from database
-  knex('guildSetting').then((rows) => {
+  knex('guildSetting').then(async (rows) => {
     rows.forEach((row) => {
       console.log('guildSettingDB: ' + row.guild + ' ' + row.textChannel)
       createTextChannel.set(row.guild, row.textChannel)
@@ -47,6 +61,30 @@ client.on('ready', () => {
           })
           .catch((err) => {
             console.log(err)
+          })
+      }
+    })
+  })
+
+  // Load textIDs from database
+  knex('textIDs').then((rows) => {
+    rows.forEach((row) => {
+      console.log('textIDsDB: ' + row.voiceChannel + ' ' + row.textChannel)
+      textIDs.set(row.voiceChannel, row.textChannel)
+    })
+
+    // Check for text channels that dont exist anymore
+    textIDs.forEach(async (textChannel, voiceChannel) => {
+      const voice = await client.channels.fetch(voiceChannel)
+      const text = await client.channels.fetch(textChannel)
+      if (!voice || !text) {
+        console.log('textIDsDelete: ' + voiceChannel + ' ' + textChannel)
+        textIDs.delete(textChannel)
+        knex('textIDs')
+          .where({ voiceChannel, textChannel })
+          .del()
+          .then(() => {
+            console.log('textIDsDeleted: ' + voiceChannel + ' ' + textChannel)
           })
       }
     })
@@ -154,6 +192,12 @@ client.on('voiceStateUpdate', (oldState, newState) => {
           })
           .then((c) => {
             textIDs.set(channel.id, c.id)
+            knex('textIDs')
+              .insert({
+                voiceChannel: channel.id,
+                textChannel: c.id,
+              })
+              .then(() => console.log('textIDs: ' + channel.id + ' ' + c.id))
           })
       })
       .catch(console.error)
@@ -220,6 +264,11 @@ client.on('voiceStateUpdate', (oldState, newState) => {
         .delete()
         .then(() => {
           textIDs.delete(oldId)
+          knex('textIDs')
+            .where('voiceChannel', oldId)
+            .del()
+            .then(() => console.log('Deleted text channel'))
+            .catch(console.error)
         })
         .catch(console.error)
   }
