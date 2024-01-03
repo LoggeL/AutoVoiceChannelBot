@@ -19,6 +19,7 @@ A bot that automatically creates voice channels for users in a server.
 ## Commands
 
 `!text` - Toggles the creation of a text channel for a voice channel
+`!check` - Displays the current channel creation setting
 
 ## License
 

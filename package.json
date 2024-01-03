@@ -1,5 +1,6 @@
 {
 	"dependencies": {
+		"discord.js": "^12.4.1",
 		"knex": "^2.3.0",
 		"sqlite3": "^5.1.2"
 	}
