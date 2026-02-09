@@ -1,41 +1,72 @@
 # AutoVoiceChannelBot
 
-A bot that automatically creates voice channels for users in a server.
+A Discord bot that automatically creates temporary voice (and optional text) channels when users join a designated "Create Channel".
 
-## How to use
+## Features
 
-1. Invite the bot to your server.
-2. Give the bot the `Manage Channels` permission.
-3. Create a category for the bot to create the channels in. (Name specificed in `config.json`)
-4. Run the bot.
+- **Auto voice channels** — joins a trigger channel → gets a personal voice channel
+- **Optional text channels** — per-guild toggle to create paired text channels with proper permissions
+- **Ownership transfer** — when the creator leaves, ownership passes to a remaining member
+- **Auto cleanup** — empty channels are deleted automatically
+- **High bitrate** — configurable per-guild high bitrate support
+
+## Setup
+
+1. Clone the repo
+2. Copy `config.json.example` → `config.json` and fill in your bot token
+3. Create a voice category matching `categoryName` and a voice channel matching `channelName` inside it
+4. Give the bot `Manage Channels` permission
+
+### Run directly
+
+```bash
+npm install
+node index.js
+```
+
+### Run with Docker
+
+```bash
+docker build -t auto-voice-channel .
+docker run -v /path/to/data:/app/data auto-voice-channel
+```
+
+The SQLite database is stored at `/app/data/db.sqlite3` (bind-mount for persistence).
 
 ## Configuration
 
-`token` - The bot token.  
-`categoryName` - The name of the category to create the channels in.  
-`channelName` - The name of the channel to create the channels in.  
-`highBitrateGuilds` - The IDs of the guilds to use a high bitrate for the channels.
+| Key | Description |
+|-----|-------------|
+| `token` | Discord bot token |
+| `categoryName` | Name of the voice channel category |
+| `channelName` | Name of the trigger voice channel |
+| `highBitrateGuilds` | Array of guild IDs that get 96kbps bitrate |
 
 ## Commands
 
-`!text` - Toggles the creation of a text channel for a voice channel
-`!check` - Displays the current channel creation setting
+| Command | Permission | Description |
+|---------|-----------|-------------|
+| `!text` | Manage Channels | Toggle text channel creation for the guild |
+| `!check` | Manage Channels | Show current text channel creation setting |
+
+## Project Structure
+
+```
+index.js              # Entry point, startup, shutdown
+src/
+  logger.js           # Structured JSON logging
+  constants.js        # Permission flags, channel types, command names
+  db.js               # SQLite database layer (knex)
+  commands.js         # Message command handler
+  voiceHandler.js     # Voice state update logic
+```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_LEVEL` | `info` | Logging level: `debug`, `info`, `warn`, `error` |
 
 ## License
 
 MIT
-
-## Credits
-
-discord.js  
-knex  
-sqlite3
-
-## Contact
-
-Discord: `@Logge#1337`  
-Telegram: `@LoggeL`
-
-## Bugs
-
-Report bugs on the [GitHub repository](https://github.com/LoggeL/AutoVoiceChannelBot/issues).
