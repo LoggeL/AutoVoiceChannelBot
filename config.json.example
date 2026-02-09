@@ -1,8 +1,6 @@
 {
-    "token": "token-here",
-    "categoryName": "Voice Chat🎤",
-    "channelName": "➕ Create Channel",
-    "highBitrateGuilds": [
-        "412986571944361984"
-    ]
+  "categoryName": "Voice Chat🎤",
+  "channelName": "➕ Create Channel",
+  "testGuild": "",
+  "highBitrateGuilds": []
 }

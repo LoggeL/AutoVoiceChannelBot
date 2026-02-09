@@ -1,5 +1,12 @@
 const { Client, GatewayIntentBits, Collection, ActivityType } = require('discord.js');
 const config = require('./config.json');
+
+// Token MUST come from environment variable
+const token = process.env.DISCORD_TOKEN || config.token;
+if (!token) {
+  console.error('DISCORD_TOKEN environment variable is required');
+  process.exit(1);
+}
 const db = require('./src/db');
 const log = require('./src/logger');
 const commands = require('./src/commands');
@@ -90,7 +97,7 @@ process.on('unhandledRejection', (err) => {
 (async () => {
   try {
     await db.init();
-    await client.login(config.token);
+    await client.login(token);
   } catch (err) {
     log.error('startup', 'Failed to start bot', { error: err.message });
     process.exit(1);
