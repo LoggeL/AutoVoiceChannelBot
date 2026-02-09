@@ -1,4 +1,4 @@
-FROM node:16-slim
+FROM node:18-slim
 
 RUN apt-get update && apt-get install -y python3 make g++ build-essential && rm -rf /var/lib/apt/lists/*
 
