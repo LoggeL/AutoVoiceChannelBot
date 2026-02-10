@@ -1,23 +1,20 @@
-const { PermissionFlagsBits, ChannelType } = require('discord.js');
+import { PermissionFlagsBits, ChannelType } from 'discord.js';
 
-module.exports = {
-  CHANNEL_TYPES: {
-    VOICE: ChannelType.GuildVoice,
-    TEXT: ChannelType.GuildText,
-    CATEGORY: ChannelType.GuildCategory,
-    DM: ChannelType.DM,
-  },
+export const CHANNEL_TYPES = {
+  VOICE: ChannelType.GuildVoice,
+  TEXT: ChannelType.GuildText,
+  CATEGORY: ChannelType.GuildCategory,
+};
 
-  PERMISSIONS: {
-    MANAGE_CHANNELS: PermissionFlagsBits.ManageChannels,
-    MANAGE_ROLES: PermissionFlagsBits.ManageRoles,
-    VIEW_CHANNEL: PermissionFlagsBits.ViewChannel,
-  },
+export const PERMISSIONS = {
+  MANAGE_CHANNELS: PermissionFlagsBits.ManageChannels,
+  MANAGE_ROLES: PermissionFlagsBits.ManageRoles,
+  VIEW_CHANNEL: PermissionFlagsBits.ViewChannel,
+};
 
-  HIGH_BITRATE: 96_000,
+export const HIGH_BITRATE = 96_000;
 
-  COMMANDS: {
-    TEXT: '!text',
-    CHECK: '!check',
-  },
+export const COMMANDS = {
+  TEXT: '!text',
+  CHECK: '!check',
 };

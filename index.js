@@ -1,16 +1,22 @@
-const { Client, GatewayIntentBits, Collection, ActivityType } = require('discord.js');
-const config = require('./config.json');
+import { Client, GatewayIntentBits, Collection, ActivityType } from 'discord.js';
+import * as db from './src/db.js';
+import log from './src/logger.js';
+import { setup as setupCommands } from './src/commands.js';
+import { setup as setupVoiceHandler } from './src/voiceHandler.js';
 
-// Token MUST come from environment variable
-const token = process.env.DISCORD_TOKEN || config.token;
+const token = process.env.DISCORD_TOKEN;
 if (!token) {
   console.error('DISCORD_TOKEN environment variable is required');
   process.exit(1);
 }
-const db = require('./src/db');
-const log = require('./src/logger');
-const commands = require('./src/commands');
-const voiceHandler = require('./src/voiceHandler');
+
+const config = {
+  categoryName: process.env.CATEGORY_NAME || 'Voice Chat🎤',
+  channelName: process.env.CHANNEL_NAME || '➕ Create Channel',
+  highBitrateGuilds: process.env.HIGH_BITRATE_GUILDS
+    ? process.env.HIGH_BITRATE_GUILDS.split(',').map(s => s.trim()).filter(Boolean)
+    : [],
+};
 
 const textIDs = new Collection();
 const createTextChannel = new Collection();
@@ -75,11 +81,9 @@ client.once('ready', async () => {
   client.user.setActivity('for !text', { type: ActivityType.Watching });
 });
 
-// Register event handlers
-commands.setup(client, createTextChannel);
-voiceHandler.setup(client, config, textIDs, createTextChannel);
+setupCommands(client, createTextChannel);
+setupVoiceHandler(client, config, textIDs, createTextChannel);
 
-// Graceful shutdown
 async function shutdown(signal) {
   log.info('shutdown', `Received ${signal}, shutting down gracefully`);
   client.destroy();
@@ -93,13 +97,10 @@ process.on('unhandledRejection', (err) => {
   log.error('process', 'Unhandled promise rejection', { error: err?.message || String(err) });
 });
 
-// Start
-(async () => {
-  try {
-    await db.init();
-    await client.login(token);
-  } catch (err) {
-    log.error('startup', 'Failed to start bot', { error: err.message });
-    process.exit(1);
-  }
-})();
+try {
+  await db.init();
+  await client.login(token);
+} catch (err) {
+  log.error('startup', 'Failed to start bot', { error: err.message });
+  process.exit(1);
+}

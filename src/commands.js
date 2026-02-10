@@ -1,11 +1,11 @@
-const { COMMANDS, CHANNEL_TYPES, PERMISSIONS } = require('./constants');
-const db = require('./db');
-const log = require('./logger');
+import { COMMANDS, PERMISSIONS } from './constants.js';
+import * as db from './db.js';
+import log from './logger.js';
 
-function setup(client, createTextChannel) {
+export function setup(client, createTextChannel) {
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    if (message.channel.type === CHANNEL_TYPES.DM) return;
+    if (!message.guild) return;
     if (!message.member.permissions.has(PERMISSIONS.MANAGE_CHANNELS)) return;
 
     try {
@@ -34,5 +34,3 @@ function setup(client, createTextChannel) {
     }
   });
 }
-
-module.exports = { setup };

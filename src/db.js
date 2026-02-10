@@ -1,9 +1,9 @@
-const knex = require('knex');
-const log = require('./logger');
+import knex from 'knex';
+import log from './logger.js';
 
 let db;
 
-async function init() {
+export async function init() {
   db = knex({
     client: 'better-sqlite3',
     connection: { filename: './db.sqlite3' },
@@ -31,46 +31,34 @@ async function init() {
   return db;
 }
 
-async function getGuildSettings() {
+export async function getGuildSettings() {
   return db('guildSetting').select('*');
 }
 
-async function insertGuildSetting(guildId, textChannel) {
+export async function insertGuildSetting(guildId, textChannel) {
   await db('guildSetting').insert({ guild: guildId, textChannel });
 }
 
-async function updateGuildSetting(guildId, textChannel) {
+export async function updateGuildSetting(guildId, textChannel) {
   await db('guildSetting').where('guild', guildId).update({ textChannel });
 }
 
-async function getTextIDs() {
+export async function getTextIDs() {
   return db('textIDs').select('*');
 }
 
-async function insertTextID(voiceChannel, textChannel) {
+export async function insertTextID(voiceChannel, textChannel) {
   await db('textIDs').insert({ voiceChannel, textChannel });
 }
 
-async function deleteTextID(voiceChannel) {
+export async function deleteTextID(voiceChannel) {
   await db('textIDs').where('voiceChannel', voiceChannel).del();
 }
 
-async function deleteTextIDByBoth(voiceChannel, textChannel) {
+export async function deleteTextIDByBoth(voiceChannel, textChannel) {
   await db('textIDs').where({ voiceChannel, textChannel }).del();
 }
 
-async function destroy() {
+export async function destroy() {
   if (db) await db.destroy();
 }
-
-module.exports = {
-  init,
-  getGuildSettings,
-  insertGuildSetting,
-  updateGuildSetting,
-  getTextIDs,
-  insertTextID,
-  deleteTextID,
-  deleteTextIDByBoth,
-  destroy,
-};

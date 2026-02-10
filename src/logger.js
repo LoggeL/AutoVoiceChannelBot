@@ -14,7 +14,7 @@ function log(level, context, message, data) {
   fn(JSON.stringify(entry));
 }
 
-module.exports = {
+export default {
   debug: (ctx, msg, data) => log('debug', ctx, msg, data),
   info: (ctx, msg, data) => log('info', ctx, msg, data),
   warn: (ctx, msg, data) => log('warn', ctx, msg, data),

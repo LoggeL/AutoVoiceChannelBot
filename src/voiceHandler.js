@@ -1,11 +1,10 @@
-const { CHANNEL_TYPES, PERMISSIONS, HIGH_BITRATE } = require('./constants');
-const db = require('./db');
-const log = require('./logger');
+import { CHANNEL_TYPES, PERMISSIONS, HIGH_BITRATE } from './constants.js';
+import * as db from './db.js';
+import log from './logger.js';
 
-// In-flight operations to prevent race conditions
 const pendingOps = new Set();
 
-function setup(client, config, textIDs, createTextChannel) {
+export function setup(client, config, textIDs, createTextChannel) {
   client.on('voiceStateUpdate', async (oldState, newState) => {
     if (oldState.channelId === newState.channelId) return;
 
@@ -24,12 +23,10 @@ function setup(client, config, textIDs, createTextChannel) {
       return;
     }
 
-    // Create new channel when user joins the creation channel
     if (newState.channel === addChannel) {
-      await handleChannelCreate(member, guild, addChannel, addCategory, config, textIDs, createTextChannel, newState, client);
+      await handleChannelCreate(member, guild, addChannel, addCategory, config, textIDs, createTextChannel, newState);
     }
 
-    // User leaves a managed channel — update text channel permissions
     if (
       createTextChannel.get(guild.id) &&
       oldState.channel &&
@@ -40,7 +37,6 @@ function setup(client, config, textIDs, createTextChannel) {
       await handleLeavePermissions(oldState, member, textIDs);
     }
 
-    // User joins a managed channel — grant text channel access
     if (
       createTextChannel.get(guild.id) &&
       newState.channel &&
@@ -50,10 +46,8 @@ function setup(client, config, textIDs, createTextChannel) {
       await handleJoinPermissions(newState, member, textIDs);
     }
 
-    // Don't delete the creation channel
     if (!oldState.channel || oldState.channel === addChannel) return;
 
-    // Remove empty channels
     if (
       oldState.channel.parent === addCategory &&
       oldState.channel.members.size === 0
@@ -61,18 +55,17 @@ function setup(client, config, textIDs, createTextChannel) {
       await handleEmptyChannel(oldState, textIDs, createTextChannel);
     }
 
-    // Transfer ownership when original owner leaves
     if (
       oldState.channel.parent === addCategory &&
       oldState.channel.members.size > 0 &&
       oldState.channel.name === member.user.username
     ) {
-      await handleOwnershipTransfer(oldState, member, textIDs, createTextChannel, client);
+      await handleOwnershipTransfer(oldState, member, textIDs, createTextChannel);
     }
   });
 }
 
-async function handleChannelCreate(member, guild, addChannel, addCategory, config, textIDs, createTextChannel, newState, client) {
+async function handleChannelCreate(member, guild, addChannel, addCategory, config, textIDs, createTextChannel, newState) {
   const opKey = `create-${member.id}-${guild.id}`;
   if (pendingOps.has(opKey)) return;
   pendingOps.add(opKey);
@@ -96,6 +89,7 @@ async function handleChannelCreate(member, guild, addChannel, addCategory, confi
 
     if (!createTextChannel.get(guild.id)) return;
 
+    const client = guild.client;
     const textChannel = await guild.channels.create({
       name: member.user.username.toLowerCase(),
       type: CHANNEL_TYPES.TEXT,
@@ -174,9 +168,11 @@ async function handleEmptyChannel(oldState, textIDs, createTextChannel) {
   }
 }
 
-async function handleOwnershipTransfer(oldState, member, textIDs, createTextChannel, client) {
+async function handleOwnershipTransfer(oldState, member, textIDs, createTextChannel) {
   try {
     const newOwner = oldState.channel.members.random();
+    if (!newOwner) return;
+
     await oldState.channel.edit({
       name: newOwner.user.username,
       permissionOverwrites: [
@@ -192,6 +188,7 @@ async function handleOwnershipTransfer(oldState, member, textIDs, createTextChan
     const txtChannel = oldState.guild.channels.cache.get(txtID);
     if (!txtChannel) return;
 
+    const client = oldState.guild.client;
     await txtChannel.permissionOverwrites.delete(member.id).catch(() => {});
     await txtChannel.permissionOverwrites.edit(newOwner.id, {
       ViewChannel: true, ManageChannels: true, ManageRoles: true,
@@ -203,5 +200,3 @@ async function handleOwnershipTransfer(oldState, member, textIDs, createTextChan
     log.error('voice', 'Failed to transfer ownership', { error: err.message });
   }
 }
-
-module.exports = { setup };
