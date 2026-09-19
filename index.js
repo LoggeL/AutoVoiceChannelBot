@@ -1,8 +1,9 @@
-import { Client, GatewayIntentBits, Collection, ActivityType } from 'discord.js';
+import { Client, GatewayIntentBits, Collection, ActivityType, Events } from 'discord.js';
 import * as db from './src/db.js';
 import log from './src/logger.js';
-import { setup as setupCommands } from './src/commands.js';
+import { setup as setupCommands, register as registerCommands } from './src/commands.js';
 import { setup as setupVoiceHandler } from './src/voiceHandler.js';
+import { loadState, cleanStaleTextIDs } from './src/startup.js';
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -20,75 +21,52 @@ const config = {
 
 const textIDs = new Collection();
 const createTextChannel = new Collection();
-
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.MessageContent,
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
-async function loadGuildSettings() {
-  const rows = await db.getGuildSettings();
-  for (const row of rows) {
-    createTextChannel.set(row.guild, Boolean(row.textChannel));
-    log.debug('startup', 'Loaded guild setting', { guild: row.guild, textChannel: row.textChannel });
-  }
+let resolveReady;
+let rejectReady;
+const ready = new Promise((resolve, reject) => {
+  resolveReady = resolve;
+  rejectReady = reject;
+});
+// Startup failures are logged below even when no event is waiting yet.
+ready.catch(() => {});
 
-  for (const [id] of client.guilds.cache) {
-    if (!createTextChannel.has(id)) {
-      createTextChannel.set(id, false);
-      await db.insertGuildSetting(id, false);
-      log.info('startup', 'Inserted default guild setting', { guild: id });
-    }
-  }
-}
+setupCommands(client, createTextChannel, { ready });
+setupVoiceHandler(client, config, textIDs, createTextChannel, { ready });
 
-async function cleanStaleTextIDs() {
-  const rows = await db.getTextIDs();
-  for (const row of rows) {
-    textIDs.set(row.voiceChannel, row.textChannel);
-    log.debug('startup', 'Loaded textID mapping', { voice: row.voiceChannel, text: row.textChannel });
-  }
-
-  for (const [voiceId, textId] of textIDs) {
-    try {
-      const voice = await client.channels.fetch(voiceId);
-      const text = await client.channels.fetch(textId);
-      if (!voice || !text) throw new Error('Channel missing');
-    } catch {
-      log.info('startup', 'Cleaning stale textID mapping', { voice: voiceId, text: textId });
-      textIDs.delete(voiceId);
-      await db.deleteTextIDByBoth(voiceId, textId).catch((err) =>
-        log.error('startup', 'Failed to clean stale textID', { error: err.message })
-      );
-    }
-  }
-}
-
-client.once('ready', async () => {
-  log.info('ready', `${client.user.tag} ready`, { guilds: client.guilds.cache.size });
-
+client.once(Events.ClientReady, async () => {
   try {
-    await loadGuildSettings();
-    await cleanStaleTextIDs();
+    await loadState(client, textIDs, createTextChannel);
+    await cleanStaleTextIDs(client, textIDs);
+    await registerCommands(client);
+    client.user.setActivity('for /text', { type: ActivityType.Watching });
+    resolveReady();
+    log.info('ready', `${client.user.tag} ready`, { guilds: client.guilds.cache.size });
   } catch (err) {
+    rejectReady(err);
     log.error('startup', 'Failed during initialization', { error: err.message });
+    await shutdown('startup failure', 1);
   }
-
-  client.user.setActivity('for !text', { type: ActivityType.Watching });
 });
 
-setupCommands(client, createTextChannel);
-setupVoiceHandler(client, config, textIDs, createTextChannel);
-
-async function shutdown(signal) {
-  log.info('shutdown', `Received ${signal}, shutting down gracefully`);
-  client.destroy();
-  await db.destroy();
-  process.exit(0);
+let stopping;
+function shutdown(reason, exitCode = 0) {
+  if (stopping) return stopping;
+  stopping = (async () => {
+    log.info('shutdown', 'Shutting down', { reason });
+    client.destroy();
+    try {
+      await db.destroy();
+    } catch (err) {
+      log.error('shutdown', 'Failed to close database', { error: err.message });
+      exitCode = 1;
+    }
+    process.exit(exitCode);
+  })();
+  return stopping;
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -101,6 +79,7 @@ try {
   await db.init();
   await client.login(token);
 } catch (err) {
+  rejectReady(err);
   log.error('startup', 'Failed to start bot', { error: err.message });
-  process.exit(1);
+  await shutdown('startup failure', 1);
 }

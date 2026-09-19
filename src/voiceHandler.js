@@ -1,202 +1,187 @@
+import { Events, OverwriteType } from 'discord.js';
 import { CHANNEL_TYPES, PERMISSIONS, HIGH_BITRATE } from './constants.js';
+import { fetchChannel, deleteChannel } from './channels.js';
+import { createQueue } from './queue.js';
 import * as db from './db.js';
 import log from './logger.js';
 
-const pendingOps = new Set();
+const ownerPermissions = PERMISSIONS.MANAGE_CHANNELS | PERMISSIONS.MANAGE_ROLES;
 
-export function setup(client, config, textIDs, createTextChannel) {
-  client.on('voiceStateUpdate', async (oldState, newState) => {
-    if (oldState.channelId === newState.channelId) return;
+function ownerOverwrites(channel, ownerId, previousOwnerId) {
+  const overwrites = new Map(channel.permissionOverwrites.cache.map(overwrite => [overwrite.id, {
+    id: overwrite.id,
+    type: overwrite.type,
+    allow: overwrite.allow.bitfield,
+    deny: overwrite.deny.bitfield,
+  }]));
+  const previous = overwrites.get(previousOwnerId);
+  if (previous) {
+    previous.allow &= ~ownerPermissions;
+    previous.deny &= ~ownerPermissions;
+    if (!previous.allow && !previous.deny) overwrites.delete(previousOwnerId);
+  }
+  const owner = overwrites.get(ownerId) ?? { id: ownerId, type: OverwriteType.Member, allow: 0n, deny: 0n };
+  owner.allow |= ownerPermissions;
+  owner.deny &= ~ownerPermissions;
+  overwrites.set(ownerId, owner);
+  return [...overwrites.values()];
+}
 
-    const member = newState.member;
-    const guild = newState.guild;
+export function setup(client, config, textIDs, createTextChannel, { database = db, ready = Promise.resolve() } = {}) {
+  const enqueue = createQueue();
+  const pendingCreations = new Set();
+  const highBitrateGuilds = new Set(config.highBitrateGuilds);
 
-    const addCategory = guild.channels.cache.find(
-      (ch) => ch.name === config.categoryName && ch.type === CHANNEL_TYPES.CATEGORY
-    );
-    const addChannel = guild.channels.cache.find(
-      (ch) => ch.name === config.channelName && ch.type === CHANNEL_TYPES.VOICE
-    );
+  async function pairedTextChannel(guild, voiceId) {
+    const textId = textIDs.get(voiceId);
+    return textId ? fetchChannel(guild.channels, textId) : null;
+  }
 
-    if (!addChannel || !addCategory) {
-      log.warn('voice', 'Missing creation channel or category', { guild: guild.id });
+  async function removeEmptyChannel(channel) {
+    if (channel.members.size > 0) return;
+    await deleteChannel(channel);
+    const text = await pairedTextChannel(channel.guild, channel.id);
+    if (text) await deleteChannel(text);
+    if (textIDs.has(channel.id)) {
+      await database.deleteTextID(channel.id);
+      textIDs.delete(channel.id);
+    }
+    log.info('voice', 'Deleted empty channel and its text pair', { channel: channel.id });
+  }
+
+  async function createChannels(member, guild, trigger, category) {
+    // Queued events may be stale if the member has already left the trigger.
+    if (member.user.bot || member.voice.channelId !== trigger.id) return;
+    let voice;
+    let text;
+    try {
+      voice = await guild.channels.create({
+        name: member.user.username.toLowerCase(),
+        type: CHANNEL_TYPES.VOICE,
+        parent: category.id,
+        permissionOverwrites: ownerOverwrites(category, member.id),
+        ...(highBitrateGuilds.has(guild.id) && { bitrate: Math.min(HIGH_BITRATE, guild.maximumBitrate) }),
+      });
+
+      if (member.voice.channelId !== trigger.id) {
+        await removeEmptyChannel(voice);
+        return;
+      }
+
+      if (createTextChannel.get(guild.id)) {
+        text = await guild.channels.create({
+          name: member.user.username.toLowerCase(),
+          type: CHANNEL_TYPES.TEXT,
+          parent: category.id,
+          permissionOverwrites: [
+            { id: member.id, allow: [PERMISSIONS.MANAGE_CHANNELS, PERMISSIONS.VIEW_CHANNEL, PERMISSIONS.MANAGE_ROLES] },
+            { id: guild.id, deny: [PERMISSIONS.VIEW_CHANNEL] },
+            { id: client.user.id, allow: [PERMISSIONS.MANAGE_CHANNELS, PERMISSIONS.VIEW_CHANNEL, PERMISSIONS.MANAGE_ROLES] },
+          ],
+        });
+        // Track the pair before moving the member so the resulting voice event
+        // cannot run before its text channel exists.
+        textIDs.set(voice.id, text.id);
+        await database.insertTextID(voice.id, text.id);
+      }
+
+      if (member.voice.channelId !== trigger.id) {
+        await removeEmptyChannel(voice);
+        return;
+      }
+      await member.voice.setChannel(voice);
+      log.info('voice', 'Created temporary channels', { guild: guild.id, voice: voice.id, text: text?.id, user: member.id });
+    } catch (err) {
+      if (voice && voice.members.size === 0) {
+        try {
+          await removeEmptyChannel(voice);
+        } catch (cleanupError) {
+          log.error('voice', 'Failed to roll back channel creation', { error: cleanupError.message, channel: voice.id });
+        }
+      }
+      throw err;
+    }
+  }
+
+  async function handleDeparture(channel, member) {
+    if (channel.members.has(member.id)) return;
+    if (channel.members.size === 0) {
+      await removeEmptyChannel(channel);
       return;
     }
 
-    if (newState.channel === addChannel) {
-      await handleChannelCreate(member, guild, addChannel, addCategory, config, textIDs, createTextChannel, newState);
+    const text = await pairedTextChannel(channel.guild, channel.id);
+    if (text && text.permissionOverwrites.cache.has(member.id) && member.id !== client.user.id) {
+      await text.permissionOverwrites.delete(member.id);
     }
 
-    if (
-      createTextChannel.get(guild.id) &&
-      oldState.channel &&
-      oldState.channel !== addChannel &&
-      oldState.channel.parentId === addCategory.id &&
-      oldState.channel.members.size > 0
-    ) {
-      await handleLeavePermissions(oldState, member, textIDs);
-    }
-
-    if (
-      createTextChannel.get(guild.id) &&
-      newState.channel &&
-      newState.channel !== addChannel &&
-      newState.channel.parentId === addCategory.id
-    ) {
-      await handleJoinPermissions(newState, member, textIDs);
-    }
-
-    if (!oldState.channel || oldState.channel === addChannel) return;
-
-    if (
-      oldState.channel.parent === addCategory &&
-      oldState.channel.members.size === 0
-    ) {
-      await handleEmptyChannel(oldState, textIDs, createTextChannel);
-    }
-
-    if (
-      oldState.channel.parent === addCategory &&
-      oldState.channel.members.size > 0 &&
-      oldState.channel.name === member.user.username
-    ) {
-      await handleOwnershipTransfer(oldState, member, textIDs, createTextChannel);
-    }
-  });
-}
-
-async function handleChannelCreate(member, guild, addChannel, addCategory, config, textIDs, createTextChannel, newState) {
-  const opKey = `create-${member.id}-${guild.id}`;
-  if (pendingOps.has(opKey)) return;
-  pendingOps.add(opKey);
-
-  try {
-    const voiceChannel = await guild.channels.create({
-      name: member.user.username.toLowerCase(),
-      type: CHANNEL_TYPES.VOICE,
-      parent: addCategory.id,
-      permissionOverwrites: [
-        { id: member.id, allow: [PERMISSIONS.MANAGE_CHANNELS, PERMISSIONS.MANAGE_ROLES] },
-      ],
-    });
-
-    if (config.highBitrateGuilds.includes(guild.id)) {
-      await voiceChannel.setBitrate(HIGH_BITRATE);
-    }
-
-    await newState.setChannel(voiceChannel);
-    log.info('voice', 'Created voice channel', { guild: guild.id, channel: voiceChannel.id, user: member.user.tag });
-
-    if (!createTextChannel.get(guild.id)) return;
-
-    const client = guild.client;
-    const textChannel = await guild.channels.create({
-      name: member.user.username.toLowerCase(),
-      type: CHANNEL_TYPES.TEXT,
-      parent: addCategory.id,
-      permissionOverwrites: [
-        { id: member.id, allow: [PERMISSIONS.MANAGE_CHANNELS, PERMISSIONS.VIEW_CHANNEL, PERMISSIONS.MANAGE_ROLES] },
-        { id: guild.id, deny: [PERMISSIONS.VIEW_CHANNEL] },
-        { id: client.user.id, allow: [PERMISSIONS.MANAGE_CHANNELS, PERMISSIONS.VIEW_CHANNEL, PERMISSIONS.MANAGE_ROLES] },
-      ],
-    });
-
-    textIDs.set(voiceChannel.id, textChannel.id);
-    await db.insertTextID(voiceChannel.id, textChannel.id);
-    log.info('voice', 'Created text channel', { voice: voiceChannel.id, text: textChannel.id });
-  } catch (err) {
-    log.error('voice', 'Failed to create channel', { error: err.message, user: member.user.tag });
-  } finally {
-    pendingOps.delete(opKey);
-  }
-}
-
-async function handleLeavePermissions(oldState, member, textIDs) {
-  const txtID = textIDs.get(oldState.channel.id);
-  if (!txtID) return;
-  const txtChannel = oldState.guild.channels.cache.get(txtID);
-  if (!txtChannel) return;
-
-  try {
-    await txtChannel.permissionOverwrites.delete(member.id);
-  } catch (err) {
-    log.error('voice', 'Failed to remove permission overwrite', { error: err.message });
-  }
-}
-
-async function handleJoinPermissions(newState, member, textIDs) {
-  const txtID = textIDs.get(newState.channel.id);
-  if (!txtID) return;
-  const txtChannel = newState.guild.channels.cache.get(txtID);
-  if (!txtChannel) return;
-
-  try {
-    await txtChannel.permissionOverwrites.edit(member.id, { ViewChannel: true });
-  } catch (err) {
-    log.error('voice', 'Failed to add permission overwrite', { error: err.message });
-  }
-}
-
-async function handleEmptyChannel(oldState, textIDs, createTextChannel) {
-  const opKey = `delete-${oldState.channel.id}`;
-  if (pendingOps.has(opKey)) return;
-  pendingOps.add(opKey);
-
-  const oldId = oldState.channel.id;
-
-  try {
-    await oldState.channel.delete();
-    log.info('voice', 'Deleted empty voice channel', { channel: oldId });
-
-    if (!createTextChannel.get(oldState.guild.id)) return;
-
-    const textChannelId = textIDs.get(oldId);
-    if (!textChannelId) return;
-
-    const textChannel = oldState.guild.channels.cache.get(textChannelId);
-    if (textChannel) {
-      await textChannel.delete();
-      log.info('voice', 'Deleted associated text channel', { channel: textChannelId });
-    }
-
-    textIDs.delete(oldId);
-    await db.deleteTextID(oldId);
-  } catch (err) {
-    log.error('voice', 'Failed to delete empty channel', { error: err.message, channel: oldId });
-  } finally {
-    pendingOps.delete(opKey);
-  }
-}
-
-async function handleOwnershipTransfer(oldState, member, textIDs, createTextChannel) {
-  try {
-    const newOwner = oldState.channel.members.random();
+    const overwrite = channel.permissionOverwrites.cache.get(member.id);
+    if (overwrite?.type !== OverwriteType.Member || !overwrite.allow.has(ownerPermissions)) return;
+    const newOwner = channel.members.find(candidate => !candidate.user.bot) ?? channel.members.first();
     if (!newOwner) return;
 
-    await oldState.channel.edit({
-      name: newOwner.user.username,
-      permissionOverwrites: [
-        { id: newOwner.id, allow: [PERMISSIONS.MANAGE_CHANNELS, PERMISSIONS.MANAGE_ROLES] },
-      ],
+    await channel.edit({
+      name: newOwner.user.username.toLowerCase(),
+      permissionOverwrites: ownerOverwrites(channel, newOwner.id, member.id),
     });
-    log.info('voice', 'Transferred channel ownership', { channel: oldState.channel.id, newOwner: newOwner.user.tag });
-
-    if (!createTextChannel.get(oldState.guild.id)) return;
-
-    const txtID = textIDs.get(oldState.channel.id);
-    if (!txtID) return;
-    const txtChannel = oldState.guild.channels.cache.get(txtID);
-    if (!txtChannel) return;
-
-    const client = oldState.guild.client;
-    await txtChannel.permissionOverwrites.delete(member.id).catch(() => {});
-    await txtChannel.permissionOverwrites.edit(newOwner.id, {
-      ViewChannel: true, ManageChannels: true, ManageRoles: true,
-    });
-    await txtChannel.permissionOverwrites.edit(client.user.id, {
-      ViewChannel: true, ManageChannels: true, ManageRoles: true,
-    });
-  } catch (err) {
-    log.error('voice', 'Failed to transfer ownership', { error: err.message });
+    if (text) {
+      await text.permissionOverwrites.edit(newOwner.id, {
+        ViewChannel: true, ManageChannels: true, ManageRoles: true,
+      });
+    }
+    log.info('voice', 'Transferred channel ownership', { channel: channel.id, newOwner: newOwner.id });
   }
+
+  const handleVoiceState = (oldState, newState) => {
+    if (oldState.channelId === newState.channelId) return Promise.resolve();
+    // Capture channel references now: queued events can outlive cache entries.
+    const previous = oldState.channel;
+    const next = newState.channel;
+    const member = newState.member ?? oldState.member;
+    const guild = newState.guild;
+    if (!member) return Promise.resolve();
+
+    // Discord can acknowledge a move before its gateway cache catches up.
+    // Deduplicate at event arrival, before either request enters the queue.
+    const creationKey = next?.type === CHANNEL_TYPES.VOICE && next.name === config.channelName &&
+      guild.channels.cache.get(next.parentId)?.name === config.categoryName
+      ? `${guild.id}:${member.id}` : null;
+    const duplicateCreation = creationKey !== null && pendingCreations.has(creationKey);
+    if (creationKey && !duplicateCreation) pendingCreations.add(creationKey);
+
+    return enqueue(guild.id, async () => {
+      await ready;
+      const category = guild.channels.cache.find(channel =>
+        channel.name === config.categoryName && channel.type === CHANNEL_TYPES.CATEGORY);
+      if (!category) return;
+      const trigger = guild.channels.cache.find(channel =>
+        channel.parentId === category.id && channel.name === config.channelName && channel.type === CHANNEL_TYPES.VOICE);
+      const isManaged = channel => channel?.type === CHANNEL_TYPES.VOICE &&
+        channel.parentId === category.id && channel.id !== trigger?.id;
+
+      if (isManaged(previous) && guild.channels.cache.has(previous.id)) {
+        try {
+          await handleDeparture(previous, member);
+        } catch (err) {
+          log.error('voice', 'Failed to handle channel departure', { error: err.message, channel: previous.id });
+        }
+      }
+
+      if (trigger && next?.id === trigger.id) {
+        if (!duplicateCreation) await createChannels(member, guild, trigger, category);
+      } else if (isManaged(next) && next.members.has(member.id)) {
+        const text = await pairedTextChannel(guild, next.id);
+        if (text && !text.permissionOverwrites.cache.get(member.id)?.allow.has(PERMISSIONS.VIEW_CHANNEL)) {
+          await text.permissionOverwrites.edit(member.id, { ViewChannel: true });
+        }
+      }
+    }).catch(err => {
+      log.error('voice', 'Failed to handle voice state', { error: err.message, guild: guild.id, user: member.id });
+    }).finally(() => {
+      if (creationKey && !duplicateCreation) pendingCreations.delete(creationKey);
+    });
+  };
+
+  client.on(Events.VoiceStateUpdate, handleVoiceState);
+  return handleVoiceState;
 }

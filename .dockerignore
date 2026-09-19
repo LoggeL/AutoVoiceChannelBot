@@ -1,0 +1,9 @@
+.git
+node_modules
+.env*
+config.json
+*.sqlite3*
+data
+coverage
+test
+*.log

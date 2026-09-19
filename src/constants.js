@@ -15,6 +15,6 @@ export const PERMISSIONS = {
 export const HIGH_BITRATE = 96_000;
 
 export const COMMANDS = {
-  TEXT: '!text',
-  CHECK: '!check',
+  TEXT: 'text',
+  CHECK: 'check',
 };

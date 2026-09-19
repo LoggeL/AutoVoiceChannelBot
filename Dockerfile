@@ -5,10 +5,11 @@ RUN apt-get update && apt-get install -y python3 make g++ build-essential && rm 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci --omit=dev
 
 COPY . .
 
-RUN mkdir -p /app/data && ln -sf /app/data/db.sqlite3 /app/db.sqlite3
+RUN mkdir -p /app/data
+ENV DATABASE_PATH=/app/data/db.sqlite3
 
 CMD ["node", "index.js"]
